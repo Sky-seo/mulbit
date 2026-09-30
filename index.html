@@ -1,0 +1,1303 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="수면을 지난 햇빛이 수영장 바닥에 맺는 빛 그물을 깊이에 따라 보여 주는 WebGL 시뮬레이터.">
+<meta name="color-scheme" content="dark">
+<title>물빛</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --abyss: #021a23;
+    --glass: rgba(3, 32, 44, 0.58);
+    --glass-strong: rgba(2, 26, 36, 0.78);
+    --edge: rgba(200, 244, 255, 0.18);
+    --ink: #effcff;
+    --ink-2: rgba(226, 247, 252, 0.78);
+    --ink-3: rgba(226, 247, 252, 0.5);
+    --sun: #ffe2a0;
+    --sun-ink: #2b2205;
+    --red: #ff8f7e;
+    --green: #86f5c6;
+    --blue: #86bcff;
+    --font-ui: "IBM Plex Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    --font-num: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+    --font-title: "Gowun Batang", "AppleMyungjo", "Nanum Myeongjo", serif;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--abyss);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  #gl {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+    touch-action: none;
+    cursor: crosshair;
+  }
+
+  .glass {
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(14px) saturate(1.15);
+    backdrop-filter: blur(14px) saturate(1.15);
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+  }
+
+  /* 상단 제목 + 현재 단계 */
+  .hud {
+    position: fixed;
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    left: 16px;
+    width: min(360px, calc(100% - 112px));
+    display: flex; flex-direction: column; gap: 12px;
+    pointer-events: none;
+  }
+  .hud h1 {
+    margin: 0;
+    font-family: var(--font-title);
+    font-weight: 700;
+    font-size: clamp(34px, 4.6vw, 52px);
+    line-height: 1;
+    letter-spacing: 0.02em;
+    text-shadow: 0 1px 2px rgba(0, 38, 52, 0.45), 0 2px 24px rgba(0, 38, 52, 0.6);
+  }
+  .hud .sub {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--ink);
+    text-shadow: 0 1px 10px rgba(0, 38, 52, 0.7);
+  }
+  .stage { padding: 12px 14px; }
+  .stage-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  }
+  .stage-name {
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--sun);
+  }
+  .stage-depth {
+    font-family: var(--font-num);
+    font-size: 12px;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .stage-text {
+    margin: 6px 0 0;
+    font-size: 13.5px;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  /* 오른쪽 수심계 */
+  .gauge {
+    position: fixed;
+    right: 16px;
+    top: calc(20px + env(safe-area-inset-top, 0px));
+    height: min(62vh, 560px);
+    width: 76px;
+    padding: 10px 8px 12px 0;
+    box-sizing: border-box;
+    background: linear-gradient(90deg, transparent, rgba(2, 30, 40, 0.42) 45%);
+    border-radius: 12px 0 0 12px;
+    pointer-events: none;
+  }
+  .gauge-label {
+    position: absolute; top: 10px; right: 8px;
+    font-size: 11px; letter-spacing: 0.1em;
+    color: var(--ink);
+    text-shadow: 0 1px 8px rgba(0, 38, 52, 0.8);
+  }
+  .gauge-track {
+    position: absolute;
+    right: 11px; top: 34px; bottom: 12px;
+    width: 2px;
+    background: linear-gradient(rgba(239, 252, 255, 0.85), rgba(239, 252, 255, 0.25));
+    border-radius: 1px;
+  }
+  .gauge-band {
+    position: absolute; right: -4px; width: 10px;
+    background: rgba(255, 226, 160, 0.38);
+    border: 1px solid rgba(255, 226, 160, 0.7);
+    border-radius: 3px;
+    transition: top 0.3s, height 0.3s;
+  }
+  .gauge-tick {
+    position: absolute; right: 0;
+    display: flex; align-items: center; gap: 5px;
+    transform: translateY(-50%);
+    font-family: var(--font-num);
+    font-size: 10.5px;
+    color: var(--ink);
+    text-shadow: 0 1px 6px rgba(0, 38, 52, 0.9);
+    font-variant-numeric: tabular-nums;
+  }
+  .gauge-tick::after {
+    content: ""; width: 6px; height: 1px; background: rgba(239, 252, 255, 0.7);
+  }
+  .gauge-marker {
+    position: absolute; right: -6px;
+    display: flex; align-items: center; gap: 6px;
+    transform: translateY(-50%);
+    will-change: top;
+  }
+  .gauge-marker span {
+    font-family: var(--font-num);
+    font-size: 12px; font-weight: 500;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--sun); color: var(--sun-ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .gauge-marker i {
+    width: 14px; height: 2px; background: var(--sun);
+    box-shadow: 0 0 8px rgba(255, 226, 160, 0.9);
+  }
+
+  /* 조절판 */
+  .panel {
+    position: fixed;
+    left: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: min(360px, calc(100% - 32px));
+    max-height: calc(100% - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+    padding: 14px 16px 12px;
+    box-sizing: border-box;
+    display: flex; flex-direction: column; gap: 12px;
+    background: var(--glass-strong);
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12.5px; color: var(--ink-2);
+  }
+  .field output {
+    font-family: var(--font-num);
+    font-size: 12px; color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+  .field.main label { font-size: 13px; color: var(--ink); font-weight: 500; }
+  .field.main output { font-size: 15px; color: var(--sun); font-weight: 500; }
+
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 22px; margin: 0;
+    background: transparent;
+    --fill: 50%;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 3px; border-radius: 2px;
+    background: linear-gradient(90deg, var(--ink) var(--fill), rgba(220, 246, 252, 0.22) var(--fill));
+  }
+  input[type="range"]::-moz-range-track {
+    height: 3px; border-radius: 2px;
+    background: linear-gradient(90deg, var(--ink) var(--fill), rgba(220, 246, 252, 0.22) var(--fill));
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px; margin-top: -6.5px;
+    border-radius: 50%; border: 0;
+    background: var(--sun);
+    box-shadow: 0 0 0 4px rgba(255, 226, 160, 0.16);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px; height: 16px;
+    border-radius: 50%; border: 0;
+    background: var(--sun);
+    box-shadow: 0 0 0 4px rgba(255, 226, 160, 0.16);
+  }
+  .field.main input[type="range"]::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -8.5px; }
+  .field.main input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; }
+  input[type="range"]:focus-visible { outline: 2px solid var(--sun); outline-offset: 3px; border-radius: 4px; }
+
+  .facts {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 5px 10px;
+    align-items: center;
+    font-size: 12px; color: var(--ink-2);
+  }
+  .facts .cap { grid-column: 1 / -1; font-size: 11.5px; color: var(--ink-3); }
+  .facts .bar {
+    height: 5px; border-radius: 3px;
+    background: rgba(220, 246, 252, 0.14);
+    overflow: hidden;
+  }
+  .facts .bar b { display: block; height: 100%; width: 50%; border-radius: 3px; transition: width 0.2s; }
+  .facts .num {
+    font-family: var(--font-num); font-size: 11.5px;
+    color: var(--ink); text-align: right; min-width: 3.5ch;
+    font-variant-numeric: tabular-nums;
+  }
+  .stats {
+    display: flex; flex-wrap: wrap; gap: 4px 14px;
+    font-size: 12px; color: var(--ink-2);
+  }
+  .stats b { font-family: var(--font-num); font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  button {
+    font: inherit; font-size: 13px;
+    color: var(--ink);
+    background: rgba(220, 246, 252, 0.08);
+    border: 1px solid var(--edge);
+    border-radius: 8px;
+    padding: 7px 12px;
+    cursor: pointer;
+  }
+  button:hover { background: rgba(220, 246, 252, 0.16); }
+  button:focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; }
+  button[aria-pressed="true"] {
+    background: rgba(255, 226, 160, 0.18);
+    border-color: rgba(255, 226, 160, 0.55);
+    color: var(--sun);
+  }
+  button[aria-pressed="true"]:hover { background: rgba(255, 226, 160, 0.26); }
+  button.primary {
+    background: var(--sun); color: var(--sun-ink); border-color: transparent; font-weight: 600;
+  }
+  button.primary:hover { background: #fff0c8; }
+  .more {
+    align-self: flex-start;
+    background: none; border: 0; padding: 2px 0;
+    font-size: 12.5px; color: var(--ink-2);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .more:hover { background: none; color: var(--ink); }
+  .more::after { content: "▾"; font-size: 10px; transition: transform 0.2s; }
+  .more[aria-expanded="true"]::after { transform: rotate(180deg); }
+  .details { display: flex; flex-direction: column; gap: 10px; }
+  .hint { margin: 0; font-size: 11.5px; color: var(--ink-3); }
+  .divider { height: 1px; background: var(--edge); }
+
+  /* D 키로 화면만 남기기 */
+  .hud, .gauge, .panel { transition: opacity 0.45s ease, transform 0.45s ease; }
+  body.bare .hud, body.bare .gauge, body.bare .panel {
+    opacity: 0; pointer-events: none;
+  }
+  body.bare .hud { transform: translateY(-10px); }
+  body.bare .panel { transform: translateY(10px); }
+  body.bare .gauge { transform: translateX(10px); }
+  @media (prefers-reduced-motion: reduce) {
+    .hud, .gauge, .panel { transition: none; }
+    body.bare .hud, body.bare .panel, body.bare .gauge { transform: none; }
+  }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--glass-strong);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--edge);
+    border-radius: 999px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+    white-space: nowrap;
+  }
+  .toast.show { opacity: 1; }
+  .toast kbd {
+    font: inherit; font-weight: 600;
+    color: var(--sun);
+  }
+
+  .fallback {
+    position: fixed; inset: 0;
+    display: grid; place-items: center;
+    padding: 0 16px;
+    background: var(--abyss);
+    text-align: center;
+  }
+  .fallback p { max-width: 36ch; line-height: 1.6; color: var(--ink-2); }
+
+  @media (max-width: 640px) {
+    .gauge { height: 34vh; width: 64px; }
+    .hud { width: calc(100% - 104px); }
+    .hud .stage-text { font-size: 12.5px; }
+    .panel { padding: 12px 14px 10px; gap: 10px; }
+  }
+  @media (max-height: 560px) {
+    .gauge { height: 46vh; }
+    .hud .stage { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="gl" aria-label="물 표면과 바닥에 맺힌 빛 무늬 시뮬레이션"></canvas>
+
+<header class="hud">
+  <div>
+    <h1>물빛</h1>
+    <p class="sub">수영장 바닥에 맺히는 빛 그물, 코스틱 시뮬레이터</p>
+  </div>
+  <div class="stage glass" aria-live="polite">
+    <div class="stage-head">
+      <span class="stage-name" id="stageName">잔잔한 물</span>
+      <span class="stage-depth" id="stageDepth">0.40 m</span>
+    </div>
+    <p class="stage-text" id="stageText">바람이 없어 수면이 평평합니다.</p>
+  </div>
+</header>
+
+<aside class="gauge" aria-hidden="true">
+  <div class="gauge-label">수심</div>
+  <div class="gauge-track" id="gaugeTrack">
+    <div class="gauge-band" id="gaugeBand"></div>
+    <div class="gauge-marker" id="gaugeMarker"><span id="gaugeValue">0.40</span><i></i></div>
+  </div>
+</aside>
+
+<section class="panel glass" aria-label="조절">
+  <div class="field main">
+    <label for="depth">수심 <output id="depthOut">0.40 m</output></label>
+    <input type="range" id="depth" min="0" max="1" step="0.001" value="0.2">
+  </div>
+
+  <div class="facts" aria-label="바닥까지 내려갔다 올라온 빛">
+    <span class="cap">바닥에 닿았다 눈까지 돌아온 빛</span>
+    <span>빨강</span><span class="bar"><b id="barR" style="background: var(--red)"></b></span><span class="num" id="numR">–</span>
+    <span>초록</span><span class="bar"><b id="barG" style="background: var(--green)"></b></span><span class="num" id="numG">–</span>
+    <span>파랑</span><span class="bar"><b id="barB" style="background: var(--blue)"></b></span><span class="num" id="numB">–</span>
+  </div>
+
+  <div class="stats">
+    <span>초점 구간 <b id="focalOut">–</b></span>
+    <span>햇빛 번짐 <b id="blurOut">–</b></span>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="dive" type="button">멈춤</button>
+    <button id="loopBtn" type="button" aria-pressed="true">반복</button>
+    <button id="drop" type="button">물방울</button>
+    <button id="restart" type="button">처음부터</button>
+  </div>
+
+  <div class="divider"></div>
+  <button class="more" id="moreBtn" type="button" aria-expanded="true" aria-controls="details">세부 조절</button>
+  <div class="details" id="details">
+    <div class="field">
+      <label for="wind">물결 세기 <output id="windOut">1.00×</output></label>
+      <input type="range" id="wind" min="0" max="2" step="0.01" value="1">
+    </div>
+    <div class="field">
+      <label for="sun">해 높이 <output id="sunOut">66°</output></label>
+      <input type="range" id="sun" min="25" max="90" step="1" value="66">
+    </div>
+    <div class="field">
+      <label for="glint">윤슬 <output id="glintOut">1.00×</output></label>
+      <input type="range" id="glint" min="0" max="2.5" step="0.01" value="1">
+    </div>
+    <div class="field">
+      <label for="disp">색 분산 <output id="dispOut">1.0×</output></label>
+      <input type="range" id="disp" min="0" max="6" step="0.1" value="1">
+    </div>
+    <div class="field">
+      <label for="turb">탁도 <output id="turbOut">0.10</output></label>
+      <input type="range" id="turb" min="0" max="1" step="0.01" value="0.1">
+    </div>
+    <div class="field">
+      <label for="speed">시간 흐름 <output id="speedOut">0.45×</output></label>
+      <input type="range" id="speed" min="0" max="1.2" step="0.01" value="0.45">
+    </div>
+  </div>
+  <p class="hint">화면을 누르거나 끌면 그 자리에 물결이 생깁니다. <kbd>D</kbd>를 누르면 조절판이 사라집니다.</p>
+</section>
+
+<div class="toast" id="toast" aria-live="polite"></div>
+
+<div class="fallback" id="fallback" hidden>
+  <p id="fallbackMsg">이 브라우저에서 WebGL 2를 쓸 수 없습니다.</p>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const canvas = $("gl");
+  const fail = (msg) => { $("fallback").hidden = false; $("fallbackMsg").textContent = msg; };
+
+  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, depth: false, stencil: false, powerPreference: "high-performance" });
+  if (!gl) { fail("이 브라우저에서 WebGL 2를 쓸 수 없습니다. 최신 Chrome, Safari, Firefox에서 열어 주세요."); return; }
+  const hasFloatTargets = gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float");
+  if (!hasFloatTargets) { fail("이 기기의 그래픽 칩이 부동소수점 렌더링을 지원하지 않아 시뮬레이션을 돌릴 수 없습니다."); return; }
+
+  // ---------- 물리 상수 (단위: 미터) ----------
+  const TILE = 5.0;              // 수면 패치가 반복되는 크기
+  const DMIN = 0.05, DMAX = 8.0; // 수심 범위
+  const N_WATER = { r: 1.3310, g: 1.3345, b: 1.3400 }; // 파장별 굴절률
+  const SIG_A = [0.45, 0.065, 0.018];                  // 순수한 물의 흡수 계수 (1/m)
+  const SUN_DISK = 0.0093;                             // 해 원반의 시직경 (rad)
+
+  const low = matchMedia("(pointer: coarse)").matches || Math.min(screen.width, screen.height) < 700;
+  const Q = low ? { grid: 384, caus: 1024, surf: 768, sim: 256 }
+                : { grid: 768, caus: 2048, surf: 1280, sim: 512 };
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------- 셰이더 ----------
+  const VS_QUAD = `#version 300 es
+  in vec2 aPos; out vec2 vUv;
+  void main(){ vUv = aPos*0.5+0.5; gl_Position = vec4(aPos,0.0,1.0); }`;
+
+  const FS_SIM = `#version 300 es
+  precision highp float;
+  uniform sampler2D uTex; uniform float uTexel; uniform float uDamp;
+  in vec2 vUv; out vec4 o;
+  void main(){
+    vec4 info = texture(uTex, vUv);
+    vec2 e = vec2(uTexel, 0.0);
+    float avg = (texture(uTex, vUv-e.xy).r + texture(uTex, vUv+e.xy).r +
+                 texture(uTex, vUv-e.yx).r + texture(uTex, vUv+e.yx).r) * 0.25;
+    info.g += (avg - info.r) * 2.0;
+    info.g *= uDamp;
+    info.r += info.g;
+    info.r *= 0.9996;
+    o = info;
+  }`;
+
+  const FS_DROP = `#version 300 es
+  precision highp float;
+  uniform sampler2D uTex; uniform vec2 uCenter; uniform float uRadius; uniform float uStrength;
+  in vec2 vUv; out vec4 o;
+  void main(){
+    vec4 info = texture(uTex, vUv);
+    vec2 d = vUv - uCenter; d -= floor(d + 0.5);
+    float x = max(0.0, 1.0 - length(d)/uRadius);
+    x = 0.5 - cos(x*3.14159265)*0.5;
+    info.r += x*uStrength;
+    o = info;
+  }`;
+
+  const NW = 40;
+  const FS_SURF = `#version 300 es
+  precision highp float;
+  #define NW ${NW}
+  uniform sampler2D uSim; uniform float uSimTexel;
+  uniform vec4 uW[NW]; uniform float uPh[NW];
+  uniform float uWind, uSimScale, uTile;
+  in vec2 vUv;
+  layout(location = 0) out vec4 oA;   // 높이, 기울기
+  layout(location = 1) out vec4 oB;   // 곡률 (hxx, hyy, hxy)
+  void main(){
+    vec2 p = vUv*uTile;
+    float h = 0.0; vec2 g = vec2(0.0); vec3 Hs = vec3(0.0);
+    for (int i=0; i<NW; i++){
+      vec4 w = uW[i];
+      float ph = dot(w.xy, p) + uPh[i];
+      float a = w.z*uWind;
+      float sn = sin(ph), cs = cos(ph);
+      h += a*sn;
+      g += a*w.xy*cs;
+      Hs -= a*sn*vec3(w.x*w.x, w.y*w.y, w.x*w.y);
+    }
+    float e = uSimTexel, d = e*uTile, k = uSimScale;
+    float s0  = texture(uSim, vUv).r;
+    float sxp = texture(uSim, vUv+vec2( e, 0.0)).r, sxm = texture(uSim, vUv+vec2(-e, 0.0)).r;
+    float syp = texture(uSim, vUv+vec2(0.0,  e)).r, sym = texture(uSim, vUv+vec2(0.0, -e)).r;
+    float spp = texture(uSim, vUv+vec2( e,  e)).r, smm = texture(uSim, vUv+vec2(-e, -e)).r;
+    float spm = texture(uSim, vUv+vec2( e, -e)).r, smp = texture(uSim, vUv+vec2(-e,  e)).r;
+    h += s0*k;
+    g += k*vec2(sxp-sxm, syp-sym)/(2.0*d);
+    Hs += k*vec3((sxp-2.0*s0+sxm)/(d*d), (syp-2.0*s0+sym)/(d*d), (spp-spm-smp+smm)/(4.0*d*d));
+    oA = vec4(h, g, 1.0);
+    oB = vec4(Hs, 1.0);
+  }`;
+
+  // 수면의 각 점에서 햇빛을 굴절시켜 바닥에 닿는 위치를 구한다.
+  // 빛이 모이는 정도는 그 사상(寫像)의 야코비 행렬식으로, 수면의 곡률에서
+  // 바로 미분해 격자점마다 구한다. 삼각형 단위로 재지 않으므로 면이 지지 않는다.
+  const VS_CAUS = `#version 300 es
+  precision highp float;
+  in vec2 aGrid;
+  uniform sampler2D uSurfA, uSurfB;
+  uniform vec4 uRect, uCRect;
+  uniform vec2 uShift;
+  uniform float uTile, uDepth, uEta;
+  uniform vec3 uL;
+  out float vI;
+  void main(){
+    vec2 p = uRect.xy + aGrid*uRect.zw;
+    vec2 uv = p/uTile;
+    vec4 A = textureLod(uSurfA, uv, 0.0);
+    vec3 Hs = textureLod(uSurfB, uv, 0.0).xyz;
+    float h = A.x; vec2 g = A.yz;
+
+    // 법선과 그 미분
+    vec3 mv = vec3(-g, 1.0);
+    float im = inversesqrt(dot(mv, mv));
+    vec3 n = mv*im;
+    vec3 c0 = vec3(-Hs.x, -Hs.z, 0.0);
+    vec3 c1 = vec3(-Hs.z, -Hs.y, 0.0);
+    vec3 dn0 = (c0 - n*dot(n, c0))*im;
+    vec3 dn1 = (c1 - n*dot(n, c1))*im;
+
+    // 굴절 방향과 그 미분
+    float cc = -dot(n, uL);
+    float kk = sqrt(max(1.0 - uEta*uEta*(1.0 - cc*cc), 1e-5));
+    vec2 dc = -vec2(dot(uL, dn0), dot(uL, dn1));
+    vec2 dcoef = (uEta - uEta*uEta*cc/kk)*dc;
+    float coef = uEta*cc - kk;
+    vec3 r = uEta*uL + coef*n;
+    vec3 dr0 = n*dcoef.x + coef*dn0;
+    vec3 dr1 = n*dcoef.y + coef*dn1;
+
+    // 바닥에 닿는 점과 그 미분
+    float w = max(-r.z, 1e-3);
+    float t = (uDepth + h)/w;
+    vec2 dt = g/w + ((uDepth + h)/(w*w))*vec2(dr0.z, dr1.z);
+    vec2 j0 = vec2(1.0, 0.0) + t*dr0.xy + r.xy*dt.x;
+    vec2 j1 = vec2(0.0, 1.0) + t*dr1.xy + r.xy*dt.y;
+    vI = 1.0/max(abs(j0.x*j1.y - j0.y*j1.x), 0.02);
+
+    vec2 q = p + r.xy*t - uShift;
+    vec2 cq = (q - uCRect.xy)/uCRect.zw;
+    gl_Position = vec4(cq*2.0-1.0, 0.0, 1.0);
+  }`;
+
+  const FS_CAUS = `#version 300 es
+  precision highp float;
+  in float vI;
+  uniform vec4 uMask;
+  out vec4 o;
+  void main(){ o = uMask*vI; }`;
+
+  // 윤슬: 바람이 만든 짧은 잔물결(1~4 cm)이 제각각 해를 비추며 반짝이는 점들
+  const FS_GLINT = `#version 300 es
+  precision highp float;
+  uniform sampler2D uSurf;
+  uniform vec4 uView;
+  uniform float uTile, uTime, uWind, uGlint, uSunI;
+  uniform vec3 uL, uSun;
+  uniform vec2 uWindDir;
+  in vec2 vUv; out vec4 o;
+
+  float hash(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
+  float vnoise(vec2 p){
+    vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
+    return mix(mix(hash(i), hash(i+vec2(1,0)), u.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
+  }
+  vec2 ripples(vec2 p, float t){
+    vec2 g = vec2(0.0);
+    for (int i = 0; i < 12; i++){
+      float fi = float(i);
+      float ang = fi*2.39996 + 0.7;
+      vec2 d = vec2(cos(ang), sin(ang));
+      float lam = mix(0.009, 0.045, fract(fi*0.618 + 0.13));
+      float k = 6.2831853/lam;
+      float w = sqrt(9.81*k + 7.2e-5*k*k*k)*0.3;
+      g += 0.032*d*cos(k*dot(d, p) - w*t + fi*1.7);
+    }
+    return g;
+  }
+  void main(){
+    vec2 p = uView.xy + vUv*uView.zw;
+    vec4 s = texture(uSurf, p/uTile);
+    // 잔물결은 바람 자국처럼 조각조각 몰려다닌다
+    float patchy = vnoise(p*2.6 - uWindDir*uTime*0.35) * 0.6 + vnoise(p*6.4 + uWindDir*uTime*0.2) * 0.4;
+    patchy = smoothstep(0.18, 0.92, patchy);
+    float amt = clamp(uWind, 0.0, 2.0) * (0.3 + 0.62*patchy);
+    vec2 warp = vec2(vnoise(p*6.0 + uTime*0.3), vnoise(p*6.0 - uTime*0.3 + 7.1)) * 0.03;
+    vec2 g = s.gb + ripples(p + warp + s.gb*0.02, uTime)*amt;
+    vec3 n = normalize(vec3(-g, 1.0));
+    vec3 H = normalize(-uL + vec3(0.0, 0.0, 1.0));
+    float d = max(dot(n, H), 0.0);
+    // 좁은 반짝임 + 넓게 퍼지는 윤기
+    float spark = pow(d, 6000.0)*20.0 + pow(d, 900.0)*0.5 + pow(d, 90.0)*0.012;
+    o = vec4(uSun*spark*uGlint*uSunI, 1.0);
+  }`;
+
+  const FS_FINAL = `#version 300 es
+  precision highp float;
+  uniform sampler2D uSurf, uCaus, uGlintTex;
+  uniform vec2 uGTexel;
+  uniform vec4 uView, uCRect;
+  uniform vec2 uShift;
+  uniform float uTile, uDepth, uCosT, uLod, uBlurUV, uExposure, uSunI;
+  uniform vec3 uL, uSigA, uSigS, uSun, uSky, uAlbedo;
+  in vec2 vUv; out vec4 o;
+
+  float hash(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
+  float vnoise(vec2 p){
+    vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3.0-2.0*f);
+    return mix(mix(hash(i), hash(i+vec2(1,0)), u.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
+  }
+  float fbm(vec2 p){ float s=0.0, a=0.5; for(int i=0;i<6;i++){ s += a*vnoise(p); p *= 2.03; a *= 0.5; } return s; }
+  vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0.0, 1.0); }
+
+  void main(){
+    vec2 p = uView.xy + vUv*uView.zw;
+    vec4 s = texture(uSurf, p/uTile);
+    vec3 n = normalize(vec3(-s.g, -s.b, 1.0));
+
+    // 위에서 내려다본 시선도 수면에서 꺾인다
+    vec3 rv = refract(vec3(0.0,0.0,-1.0), n, 1.0/1.333);
+    vec2 f = p + rv.xy*((uDepth + s.r)/(-rv.z));
+
+    vec2 cuv = (f - uShift - uCRect.xy)/uCRect.zw;
+    vec3 c = textureLod(uCaus, cuv, uLod).rgb*0.196;
+    for (int i = 0; i < 8; i++){
+      float a = float(i)*0.78539816 + 0.39269908;
+      c += textureLod(uCaus, cuv + vec2(cos(a), sin(a))*uBlurUV, uLod).rgb*0.1005;
+    }
+
+    vec3 ext = uSigA + uSigS*0.5;
+    vec3 Td = exp(-ext*uDepth/uCosT);
+    vec3 Tu = exp(-ext*uDepth);
+    float m = fbm(f*26.0)*0.42 + fbm(f*7.0+1.3)*0.34 + fbm(f*1.7+3.1)*0.24;
+    vec3 alb = uAlbedo*(0.86 + 0.2*m);
+    vec3 E = uSun*uSunI*c*Td*uCosT + uSky*exp(-ext*uDepth*1.25);
+    vec3 col = alb*E*Tu;
+
+    vec3 extT = uSigA + uSigS;
+    vec3 vol = (uSigS/extT)*(1.0 - exp(-extT*uDepth*1.6))*(uSun*uSunI*0.3 + uSky*0.8);
+    col += vol*vec3(0.5, 0.9, 1.0);
+
+    float F = 0.02 + 0.98*pow(1.0 - n.z, 5.0);
+    col = col*(1.0-F) + uSky*1.4*F;
+    // 윤슬: 반짝이는 점 + 번지는 빛무리 + 십자 빛살
+    vec3 gl0 = texture(uGlintTex, vUv).rgb;
+    vec3 bloom = textureLod(uGlintTex, vUv, 2.5).rgb*1.0
+               + textureLod(uGlintTex, vUv, 4.0).rgb*1.6
+               + textureLod(uGlintTex, vUv, 5.5).rgb*1.3;
+    vec3 star = vec3(0.0);
+    vec2 sa = uGTexel*vec2(0.94, 0.34), sb = uGTexel*vec2(-0.34, 0.94);
+    for (int i = 1; i <= 7; i++){
+      float fi = float(i);
+      float w = exp(-fi*0.5);
+      vec2 a = sa*fi*0.85, b = sb*fi*0.85;
+      star += (textureLod(uGlintTex, vUv+a, 1.0).rgb + textureLod(uGlintTex, vUv-a, 1.0).rgb +
+               textureLod(uGlintTex, vUv+b, 1.0).rgb + textureLod(uGlintTex, vUv-b, 1.0).rgb)*w;
+    }
+    col += gl0 + bloom*0.14 + star*0.07;
+
+    vec2 q = vUv - 0.5; col *= 1.0 - dot(q,q)*0.3;
+    col = pow(aces(col*uExposure), vec3(1.0/2.2));
+    col += (hash(gl_FragCoord.xy) - 0.5)/255.0;
+    o = vec4(col, 1.0);
+  }`;
+
+  function compile(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  function program(vs, fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.bindAttribLocation(p, 0, "aPos");
+    gl.bindAttribLocation(p, 0, "aGrid");
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    const u = {};
+    const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) {
+      const info = gl.getActiveUniform(p, i);
+      u[info.name.replace(/\[0\]$/, "")] = gl.getUniformLocation(p, info.name);
+    }
+    return { p, u };
+  }
+  function target(w, h, { wrap = gl.CLAMP_TO_EDGE, mip = false } = {}) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    const levels = mip ? Math.floor(Math.log2(Math.max(w, h))) + 1 : 1;
+    gl.texStorage2D(gl.TEXTURE_2D, levels, gl.RGBA16F, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mip ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { tex, fbo, w, h, ok };
+  }
+
+  let P;
+  try {
+    P = {
+      sim: program(VS_QUAD, FS_SIM),
+      drop: program(VS_QUAD, FS_DROP),
+      surf: program(VS_QUAD, FS_SURF),
+      caus: program(VS_CAUS, FS_CAUS),
+      glint: program(VS_QUAD, FS_GLINT),
+      final: program(VS_QUAD, FS_FINAL),
+    };
+  } catch (e) {
+    console.error(e);
+    fail("셰이더를 준비하지 못했습니다. 다른 브라우저에서 열어 주세요.");
+    return;
+  }
+
+  function targetMRT(w, h, wrap) {
+    const mk = () => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, w, h);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+      return tex;
+    };
+    const texA = mk(), texB = mk();
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texA, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, texB, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { texA, texB, fbo, ok };
+  }
+
+  let simA = target(Q.sim, Q.sim, { wrap: gl.REPEAT });
+  let simB = target(Q.sim, Q.sim, { wrap: gl.REPEAT });
+  const surf = targetMRT(Q.surf, Q.surf, gl.REPEAT);
+  const caus = target(Q.caus, Q.caus, { mip: true });
+  if (![simA, simB, surf, caus].every((t) => t.ok)) {
+    fail("이 기기에서는 부동소수점 렌더 타깃을 만들 수 없어 시뮬레이션을 돌릴 수 없습니다.");
+    return;
+  }
+
+  // 화면 전체 삼각형
+  const quadVAO = gl.createVertexArray();
+  gl.bindVertexArray(quadVAO);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  // 빛을 굴절시킬 수면 격자. 기기가 버거워하면 절반짜리로 갈아탄다.
+  const G = Q.grid, GV = G + 1;
+  const gridBuf = gl.createBuffer();
+  {
+    const gv = new Float32Array(GV * GV * 2);
+    for (let y = 0, k = 0; y < GV; y++) for (let x = 0; x < GV; x++) { gv[k++] = x / G; gv[k++] = y / G; }
+    gl.bindBuffer(gl.ARRAY_BUFFER, gridBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, gv, gl.STATIC_DRAW);
+  }
+  function gridMesh(step) {
+    const n = G / step;
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gridBuf);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    const gi = new Uint32Array(n * n * 6);
+    for (let y = 0, k = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const a = y * step * GV + x * step, b = a + step, c = a + step * GV, d = c + step;
+      gi[k++] = a; gi[k++] = b; gi[k++] = c; gi[k++] = b; gi[k++] = d; gi[k++] = c;
+    }
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, gi, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    return { vao, count: gi.length };
+  }
+  const meshFull = gridMesh(1), meshHalf = gridMesh(2);
+  let heavy = true, slowRun = 0;
+
+  // ---------- 물결 스펙트럼 ----------
+  function mulberry32(a) {
+    return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  const rnd = mulberry32(20260930);
+  const waves = new Float32Array(NW * 4);
+  const phase0 = new Float64Array(NW);
+  const omega = new Float64Array(NW);
+  const windDir = Math.PI * 0.2;
+  {
+    let i = 0;
+    while (i < NW) {
+      const lam = Math.exp(Math.log(0.1) + (Math.log(1.2) - Math.log(0.1)) * rnd());
+      const nmag = TILE / lam;
+      const ang = i % 2 ? rnd() * Math.PI * 2 : windDir + (rnd() - 0.5) * 2.1;
+      const nx = Math.round(nmag * Math.cos(ang)), ny = Math.round(nmag * Math.sin(ang));
+      if (nx === 0 && ny === 0) continue;
+      const kx = (2 * Math.PI * nx) / TILE, ky = (2 * Math.PI * ny) / TILE;
+      const k = Math.hypot(kx, ky);
+      const steep = 0.022 * (0.6 + 0.8 * rnd()) * (2 * Math.PI / k < 0.15 ? 0.7 : 1);
+      waves[i * 4] = kx; waves[i * 4 + 1] = ky; waves[i * 4 + 2] = steep / k;
+      omega[i] = Math.sqrt(9.81 * k + 7.2e-5 * k * k * k);
+      phase0[i] = rnd() * Math.PI * 2;
+      i++;
+    }
+  }
+  // 곡률의 제곱평균 → 초점 거리 추정
+  let curv2 = 0;
+  for (let i = 0; i < NW; i++) { const k = Math.hypot(waves[i * 4], waves[i * 4 + 1]); const c = waves[i * 4 + 2] * k * k; curv2 += 0.5 * c * c; }
+  const curvRms = Math.sqrt(curv2);
+  const focalBand = (w) => {
+    if (w < 0.03) return null;
+    const c = curvRms * w, lens = 1 - 1 / 1.3345;
+    return [1 / (2.5 * c * lens), 1 / (c * lens)];
+  };
+
+  // ---------- 상태 ----------
+  const ui = {
+    depth: $("depth"), wind: $("wind"), sun: $("sun"), glint: $("glint"), disp: $("disp"), turb: $("turb"), speed: $("speed"),
+  };
+  const sToD = (s) => DMIN + (DMAX - DMIN) * s * s;
+  const dToS = (d) => Math.sqrt(Math.max(0, (d - DMIN) / (DMAX - DMIN)));
+
+  const state = { depth: 0.4, wind: 1, sun: 66, glint: 1, disp: 1, turb: 0.1, speed: 0.45 };
+  let simTime = 0, simAcc = 0, clock = 0, windRamp = 1;
+  let intro = null;     // { t, dropped }
+  let journey = null;   // { t, s0, s1, dur }
+  const drops = [];
+
+  function startIntro() {
+    for (const t of [simA, simB]) { gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
+    if (reduceMotion) {
+      intro = null; journey = null; windRamp = 1; setDepth(1.2); updateDiveBtn();
+      return;
+    }
+    windRamp = 0;
+    setDepth(0.4);
+    intro = { t: 0, dropped: false };
+    journey = null;
+    updateDiveBtn();
+  }
+  // 5 m까지 내려갔다가 얕은 물로 올라오기를 되풀이한다
+  const DIVE_TOP = 0.12, DIVE_BOTTOM = 5.0;
+  const leg = (s0, s1, hold) => ({ t: -(hold || 0), s0, s1, dur: 48 * Math.abs(s1 - s0) / 0.75 });
+  const atBottom = (sv) => sv >= dToS(DIVE_BOTTOM) - 0.02;
+  function startJourney(fromDepth) {
+    const s0 = dToS(fromDepth ?? state.depth);
+    journey = leg(s0, dToS(atBottom(s0) ? DIVE_TOP : DIVE_BOTTOM), 0);
+    updateDiveBtn();
+  }
+  function updateDiveBtn() {
+    const running = journey || (intro && !reduceMotion);
+    $("dive").textContent = running ? "멈춤"
+      : atBottom(dToS(state.depth)) ? "상승 재생" : "하강 재생";
+  }
+
+  // ---------- 입력 ----------
+  function setFill(el) {
+    const min = +el.min, max = +el.max;
+    el.style.setProperty("--fill", ((+el.value - min) / (max - min)) * 100 + "%");
+  }
+  function setDepth(d) {
+    state.depth = d;
+    ui.depth.value = dToS(d);
+    setFill(ui.depth);
+  }
+  const fmtD = (d) => (d < 1 ? d.toFixed(2) : d.toFixed(2)) + " m";
+
+  ui.depth.addEventListener("input", () => {
+    journey = null; if (intro) intro.noJourney = true;
+    state.depth = sToD(+ui.depth.value); setFill(ui.depth); updateDiveBtn();
+  });
+  const bind = (key, out, fmt) => {
+    const el = ui[key];
+    const apply = () => { state[key] = +el.value; $(out).textContent = fmt(+el.value); setFill(el); };
+    el.addEventListener("input", () => {
+      if (key === "wind") windRamp = 1;
+      apply();
+    });
+    apply();
+  };
+  bind("wind", "windOut", (v) => v.toFixed(2) + "×");
+  bind("sun", "sunOut", (v) => v + "°");
+  bind("glint", "glintOut", (v) => v.toFixed(2) + "×");
+  bind("disp", "dispOut", (v) => v.toFixed(1) + "×");
+  bind("turb", "turbOut", (v) => v.toFixed(2));
+  bind("speed", "speedOut", (v) => v.toFixed(2) + "×");
+
+  $("dive").addEventListener("click", () => {
+    if (journey || intro) { journey = null; if (intro) { intro.noJourney = true; windRamp = Math.max(windRamp, 0.999); } }
+    else startJourney();
+    updateDiveBtn();
+  });
+  let looping = true;
+  $("loopBtn").addEventListener("click", () => {
+    looping = !looping;
+    $("loopBtn").setAttribute("aria-pressed", String(looping));
+    if (looping && !journey && !intro) startJourney();
+    updateDiveBtn();
+  });
+  $("drop").addEventListener("click", () => {
+    const x = 0.3 + rnd() * 0.4, y = 0.3 + rnd() * 0.4;
+    drops.push({ uv: screenToSim(x, y), r: 0.022, s: 2.4 });
+  });
+  $("restart").addEventListener("click", startIntro);
+
+  const moreBtn = $("moreBtn"), details = $("details");
+  const setMore = (open) => { moreBtn.setAttribute("aria-expanded", String(open)); details.hidden = !open; };
+  setMore(!(innerWidth < 640 || innerHeight < 720));
+  moreBtn.addEventListener("click", () => setMore(details.hidden));
+
+  // 화면 좌표 (0..1, 위가 0) → 시뮬레이션 uv
+  const view = { x: 0, y: 0, w: 1, h: 1 };
+  function screenToSim(fx, fy) {
+    const px = view.x + fx * view.w, py = view.y + (1 - fy) * view.h;
+    return [((px / TILE) % 1 + 1) % 1, ((py / TILE) % 1 + 1) % 1];
+  }
+  let pointerDown = false, lastP = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    pointerDown = true; canvas.setPointerCapture(e.pointerId);
+    const r = canvas.getBoundingClientRect();
+    const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+    drops.push({ uv: screenToSim(fx, fy), r: 0.014, s: 1.2 });
+    lastP = [e.clientX, e.clientY];
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!pointerDown) return;
+    const r = canvas.getBoundingClientRect();
+    const dx = e.clientX - lastP[0], dy = e.clientY - lastP[1];
+    const mPerPx = view.w / r.width;
+    if (Math.hypot(dx, dy) * mPerPx < 0.02) return;
+    lastP = [e.clientX, e.clientY];
+    drops.push({ uv: screenToSim((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height), r: 0.009, s: 0.45 });
+  });
+  // D: 조절판을 모두 걷어내고 물만 남긴다
+  let toastTimer = 0;
+  function toast(html) {
+    const el = $("toast");
+    el.innerHTML = html;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
+  }
+  let bare = false;
+  function setBare(v) {
+    if (v === bare) return;
+    bare = v;
+    document.body.classList.toggle("bare", v);
+    if (v) toast("<kbd>D</kbd>를 다시 누르면 조절판이 돌아옵니다");
+    else { clearTimeout(toastTimer); $("toast").classList.remove("show"); }
+  }
+  addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = (e.key || "").toLowerCase();
+    if (e.code === "KeyD" || k === "d" || k === "ㅇ") { e.preventDefault(); setBare(!bare); }
+    else if (k === "escape" && bare) setBare(false);
+  });
+
+  const up = () => { pointerDown = false; };
+  canvas.addEventListener("pointerup", up);
+  canvas.addEventListener("pointercancel", up);
+
+  // ---------- 크기 ----------
+  let glint = null;
+  function makeGlint() {
+    const d = low ? 2 : 1;
+    const w = Math.max(1, Math.round(canvas.width / d)), h = Math.max(1, Math.round(canvas.height / d));
+    if (glint && glint.w === w && glint.h === h) return;
+    if (glint) { gl.deleteTexture(glint.tex); gl.deleteFramebuffer(glint.fbo); }
+    glint = target(w, h, { mip: true });
+  }
+  function resize() {
+    let dpr = Math.min(devicePixelRatio || 1, 2);
+    const cw = canvas.clientWidth, ch = canvas.clientHeight;
+    const maxPx = low ? 2.2e6 : 5.0e6;
+    if (cw * ch * dpr * dpr > maxPx) dpr = Math.sqrt(maxPx / (cw * ch));
+    canvas.width = Math.max(1, Math.round(cw * dpr));
+    canvas.height = Math.max(1, Math.round(ch * dpr));
+    const aspect = cw / ch;
+    let w, h;
+    const short = 1.6;
+    if (aspect >= 1) { h = short; w = short * aspect; } else { w = short; h = short / aspect; }
+    const longMax = 3.4, long = Math.max(w, h);
+    if (long > longMax) { w *= longMax / long; h *= longMax / long; }
+    view.w = w; view.h = h;
+    view.x = TILE * 0.5 - w / 2; view.y = TILE * 0.5 - h / 2;
+    makeGlint();
+  }
+  addEventListener("resize", resize);
+  resize();
+
+  // ---------- 수심계 ----------
+  const track = $("gaugeTrack");
+  for (const d of [0.1, 0.25, 0.5, 1, 2, 3, 5, 8]) {
+    const el = document.createElement("div");
+    el.className = "gauge-tick";
+    el.style.top = dToS(d) * 100 + "%";
+    el.textContent = d < 1 ? d.toFixed(2).replace(/^0/, "") : String(d);
+    track.appendChild(el);
+  }
+
+  // ---------- 단계 설명 ----------
+  const STAGES = {
+    calm: ["잔잔한 물", "바람이 없어 수면이 평평합니다. 빛이 꺾이지 않고 곧게 들어가 바닥이 고르게 밝습니다."],
+    shallow: ["얕은 물", "물이 얕아 꺾인 빛이 흩어질 틈이 없습니다. 바닥은 고르게 밝고, 물결은 옅은 얼룩으로만 비칩니다."],
+    gather: ["빛이 모이기 시작", "볼록한 물결이 작은 렌즈처럼 빛을 모읍니다. 짧은 잔물결부터 먼저 초점을 맺어 부드러운 무늬가 떠오릅니다."],
+    focus: ["초점 구간", "빛이 가는 선으로 모여 그물 무늬가 가장 선명합니다. 선 위는 평균보다 몇 배 밝고, 그 사이는 어두워집니다."],
+    cross: ["초점 너머", "광선이 서로 엇갈려 선이 갈라지고 겹칩니다. 이제는 긴 물결이 초점을 맺어 무늬가 더 크고 복잡해집니다."],
+    deep: ["깊은 물", "빨간빛이 먼저 흡수되어 바닥이 푸르게 가라앉습니다. 해 원반의 크기와 산란 때문에 선이 번져 무늬가 흐려집니다."],
+  };
+  let stageKey = "";
+  function stageFor(d, band) {
+    if (!band) return "calm";
+    const [a, b] = band;
+    if (d < a * 0.45) return "shallow";
+    if (d < a) return "gather";
+    if (d <= b) return "focus";
+    if (d <= b * 2.2) return "cross";
+    return "deep";
+  }
+
+  let hudTimer = 0;
+  function updateHud(windEff, blurM, cosT) {
+    const d = state.depth;
+    $("depthOut").textContent = fmtD(d);
+    const dir = journey && journey.t >= 0 ? (journey.s1 > journey.s0 ? " ↓" : " ↑") : "";
+    $("stageDepth").textContent = fmtD(d) + dir;
+    $("gaugeValue").textContent = d.toFixed(2);
+    $("gaugeMarker").style.top = dToS(d) * 100 + "%";
+
+    const band = focalBand(windEff);
+    const band0 = focalBand(state.wind);
+    const gb = $("gaugeBand");
+    if (band0) {
+      const t = dToS(Math.min(band0[0], DMAX)), b = dToS(Math.min(band0[1], DMAX));
+      gb.hidden = false; gb.style.top = t * 100 + "%"; gb.style.height = Math.max(0.5, (b - t) * 100) + "%";
+      $("focalOut").textContent = band0[0] > DMAX ? "8 m 너머" : `${band0[0].toFixed(1)}–${Math.min(band0[1], 99).toFixed(1)} m`;
+    } else { gb.hidden = true; $("focalOut").textContent = "없음"; }
+
+    const cm = blurM * 100;
+    $("blurOut").textContent = cm < 1 ? `${(cm * 10).toFixed(1)} mm` : `${cm.toFixed(1)} cm`;
+
+    const path = d * (1 + 1 / cosT);
+    const sigS = [0.25, 0.3, 0.35].map((v) => v * state.turb);
+    ["R", "G", "B"].forEach((c, i) => {
+      const T = Math.exp(-(SIG_A[i] + sigS[i] * 0.5) * path);
+      $("bar" + c).style.width = (T * 100).toFixed(1) + "%";
+      $("num" + c).textContent = Math.round(T * 100) + "%";
+    });
+
+    const key = stageFor(d, band);
+    if (key !== stageKey) {
+      stageKey = key;
+      $("stageName").textContent = STAGES[key][0];
+      $("stageText").textContent = STAGES[key][1];
+    }
+  }
+
+  // ---------- 렌더 ----------
+  const ph = new Float32Array(NW);
+  function refractFlat(L, eta) {
+    const cosI = -L[2];
+    const k = 1 - eta * eta * (1 - cosI * cosI);
+    const f = eta * cosI - Math.sqrt(k);
+    return [eta * L[0], eta * L[1], eta * L[2] + f];
+  }
+  function quad() { gl.bindVertexArray(quadVAO); gl.drawArrays(gl.TRIANGLES, 0, 3); }
+
+  function simStep() {
+    gl.useProgram(P.sim.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, simB.fbo);
+    gl.viewport(0, 0, Q.sim, Q.sim);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, simA.tex);
+    gl.uniform1i(P.sim.u.uTex, 0);
+    gl.uniform1f(P.sim.u.uTexel, 1 / Q.sim);
+    gl.uniform1f(P.sim.u.uDamp, 0.9975);
+    quad();
+    [simA, simB] = [simB, simA];
+  }
+  function applyDrop(d) {
+    gl.useProgram(P.drop.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, simB.fbo);
+    gl.viewport(0, 0, Q.sim, Q.sim);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, simA.tex);
+    gl.uniform1i(P.drop.u.uTex, 0);
+    gl.uniform2f(P.drop.u.uCenter, d.uv[0], d.uv[1]);
+    gl.uniform1f(P.drop.u.uRadius, d.r);
+    gl.uniform1f(P.drop.u.uStrength, d.s);
+    quad();
+    [simA, simB] = [simB, simA];
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    clock += dt;
+
+    // 인트로: 물방울이 떨어져 번지고, 바람이 일고, 천천히 내려간다
+    if (intro) {
+      intro.t += dt;
+      if (!intro.dropped && intro.t > 0.35) {
+        intro.dropped = true;
+        drops.push({ uv: screenToSim(0.5, 0.5), r: 0.03, s: 3.2 });
+      }
+      if (windRamp < 1) windRamp = Math.min(1, Math.max(windRamp, smooth(1.8, 9, intro.t)));
+      if (!intro.noJourney && intro.t > 3 && !journey) startJourney(state.depth);
+      if (intro.t > 9) { intro = null; windRamp = 1; updateDiveBtn(); }
+    }
+    if (journey) {
+      journey.t += dt;
+      if (journey.t >= 0) {
+        const u = Math.min(1, journey.t / journey.dur);
+        const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+        setDepth(sToD(journey.s0 + (journey.s1 - journey.s0) * (0.15 * u + 0.85 * e)));
+        if (u >= 1) {
+          // 끝에서 잠깐 머물렀다가 반대 방향으로
+          journey = looping ? leg(journey.s1, dToS(atBottom(journey.s1) ? DIVE_TOP : DIVE_BOTTOM), 1.6) : null;
+          updateDiveBtn();
+        }
+      }
+    }
+
+    const sdt = dt * state.speed;
+    simTime += sdt;
+    simAcc += sdt;
+    let steps = 0;
+    while (simAcc > 1 / 120 && steps < 4) { simStep(); simAcc -= 1 / 120; steps++; }
+    if (steps === 4) simAcc = 0;
+    while (drops.length) applyDrop(drops.shift());
+
+    const windEff = state.wind * windRamp;
+    const D = state.depth;
+
+    // 1) 수면 높이와 기울기
+    for (let i = 0; i < NW; i++) ph[i] = (phase0[i] - omega[i] * simTime) % (Math.PI * 2);
+    gl.useProgram(P.surf.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, surf.fbo);
+    gl.viewport(0, 0, Q.surf, Q.surf);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, simA.tex);
+    gl.uniform1i(P.surf.u.uSim, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    gl.uniform1f(P.surf.u.uSimTexel, 1 / Q.sim);
+    gl.uniform4fv(P.surf.u.uW, waves);
+    gl.uniform1fv(P.surf.u.uPh, ph);
+    gl.uniform1f(P.surf.u.uWind, windEff);
+    gl.uniform1f(P.surf.u.uSimScale, 0.006);
+    gl.uniform1f(P.surf.u.uTile, TILE);
+    quad();
+
+    // 2) 바닥의 빛 (코스틱)
+    const el = (state.sun * Math.PI) / 180, az = Math.PI * 1.25;
+    const L = [-Math.cos(el) * Math.cos(az), -Math.cos(el) * Math.sin(az), -Math.sin(el)];
+    const r0 = refractFlat(L, 1 / N_WATER.g);
+    const cosT = -r0[2];
+    const shift = [(r0[0] * D) / cosT, (r0[1] * D) / cosT];
+    const mv = 0.12 + 0.08 * D;
+    const side = Math.max(view.w, view.h) + 2 * mv;
+    const cx = view.x + view.w / 2, cy = view.y + view.h / 2;
+    const cr = [cx - side / 2, cy - side / 2, side, side];
+    const mc = 0.12 + 0.09 * D;
+    const mr = [cr[0] - mc, cr[1] - mc, side + 2 * mc, side + 2 * mc];
+
+    gl.useProgram(P.caus.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, caus.fbo);
+    gl.viewport(0, 0, Q.caus, Q.caus);
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, surf.texA);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, surf.texB);
+    gl.uniform1i(P.caus.u.uSurfA, 0);
+    gl.uniform1i(P.caus.u.uSurfB, 1);
+    gl.uniform4fv(P.caus.u.uRect, mr);
+    gl.uniform4fv(P.caus.u.uCRect, cr);
+    gl.uniform2fv(P.caus.u.uShift, shift);
+    gl.uniform1f(P.caus.u.uTile, TILE);
+    gl.uniform1f(P.caus.u.uDepth, D);
+    gl.uniform3fv(P.caus.u.uL, L);
+    const mesh = heavy ? meshFull : meshHalf;
+    gl.bindVertexArray(mesh.vao);
+    const x = state.disp;
+    const chans = x < 0.05
+      ? [[N_WATER.g, [1, 1, 1, 0]]]
+      : [[N_WATER.g + (N_WATER.r - N_WATER.g) * x, [1, 0, 0, 0]],
+         [N_WATER.g, [0, 1, 0, 0]],
+         [N_WATER.g + (N_WATER.b - N_WATER.g) * x, [0, 0, 1, 0]]];
+    for (const [n, mask] of chans) {
+      gl.uniform1f(P.caus.u.uEta, 1 / n);
+      gl.uniform4fv(P.caus.u.uMask, mask);
+      gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_INT, 0);
+    }
+    gl.disable(gl.BLEND);
+    gl.bindTexture(gl.TEXTURE_2D, caus.tex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+
+    // 3) 화면
+    const pxM = side / Q.caus;
+    const blurM = Math.hypot(D * SUN_DISK, state.turb * D * 0.05);
+    const lod = Math.max(0, Math.log2(Math.max(blurM / pxM, 1)) - 0.5);
+    const sunI = 0.55 + 0.6 * Math.sin(el);
+    gl.useProgram(P.glint.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, glint.fbo);
+    gl.viewport(0, 0, glint.w, glint.h);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, surf.texA);
+    const ug = P.glint.u;
+    gl.uniform1i(ug.uSurf, 0);
+    gl.uniform4f(ug.uView, view.x, view.y, view.w, view.h);
+    gl.uniform1f(ug.uTile, TILE);
+    gl.uniform1f(ug.uTime, simTime % 600);
+    gl.uniform1f(ug.uWind, windEff);
+    gl.uniform1f(ug.uGlint, state.glint);
+    gl.uniform1f(ug.uSunI, sunI);
+    gl.uniform3fv(ug.uL, L);
+    gl.uniform3f(ug.uSun, 1.0, 0.97, 0.9);
+    gl.uniform2f(ug.uWindDir, Math.cos(windDir), Math.sin(windDir));
+    quad();
+    gl.bindTexture(gl.TEXTURE_2D, glint.tex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+
+    gl.useProgram(P.final.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, surf.texA);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, caus.tex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, glint.tex);
+    const u = P.final.u;
+    gl.uniform1i(u.uSurf, 0); gl.uniform1i(u.uCaus, 1); gl.uniform1i(u.uGlintTex, 2);
+    gl.uniform2f(u.uGTexel, 2 / glint.w, 2 / glint.h);
+    gl.uniform4f(u.uView, view.x, view.y, view.w, view.h);
+    gl.uniform4fv(u.uCRect, cr);
+    gl.uniform2fv(u.uShift, shift);
+    gl.uniform1f(u.uTile, TILE);
+    gl.uniform1f(u.uDepth, D);
+    gl.uniform1f(u.uCosT, cosT);
+    gl.uniform1f(u.uLod, lod);
+    gl.uniform1f(u.uBlurUV, (0.5 * blurM) / side);
+    gl.uniform1f(u.uExposure, 0.82);
+    gl.uniform1f(u.uSunI, sunI);
+    gl.uniform3fv(u.uL, L);
+    gl.uniform3fv(u.uSigA, SIG_A);
+    gl.uniform3f(u.uSigS, 0.25 * state.turb + 0.002, 0.3 * state.turb + 0.005, 0.35 * state.turb + 0.01);
+    gl.uniform3f(u.uSun, 1.0, 0.97, 0.9);
+    gl.uniform3f(u.uSky, 0.17, 0.25, 0.34);
+    gl.uniform3f(u.uAlbedo, 0.24, 0.72, 0.86);
+    gl.bindVertexArray(quadVAO);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    if (heavy && clock > 2.5) {
+      slowRun = dt > 0.034 ? slowRun + 1 : Math.max(0, slowRun - 2);
+      if (slowRun > 70) heavy = false;
+    }
+
+    hudTimer -= dt;
+    if (hudTimer <= 0 || journey) { hudTimer = 0.1; updateHud(windEff, blurM, cosT); }
+
+    requestAnimationFrame(frame);
+  }
+  function smooth(a, b, t) { const x = Math.min(1, Math.max(0, (t - a) / (b - a))); return x * x * (3 - 2 * x); }
+
+  startIntro();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
